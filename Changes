@@ -1,0 +1,21 @@
+Revision history for Perl extension Text::Forge.
+
+0.27
+        - fixed DESTROY bug in clones
+        - better support for CGI::Carp
+ 
+0.25  Mon Oct 25 19:03:33 PDT 1999
+        - increased Text::Forge::SMTP error verbosity
+        - improved Text::Forge::SMTP cached connection interface 
+
+0.24  Fri Oct 8 13:03:02 PDT 1999
+        - preliminary Text::Forge::SMTP support added
+        - fixed Text::Forge::Sendmail::as_string() to return
+          a single string rather than list
+
+0.23  Mon Jul 26 06:59:08 PDT 1999
+        - added Apache::Status entry for Text::Forge::MemCache
+        - added support for CGI::Carp if loaded
+
+0.19  Wed Apr 28 00:41:22 1999
+	- added Text::Forge::ModPerl 

@@ -1,0 +1,107 @@
+#!/usr/bin/perl
+
+use strict;
+use vars qw( $LIST_FH $CHECK_FH $LOG_FH );
+use Fcntl qw( :flock );
+use IO::File;
+use Getopt::Long qw( GetOptions );
+use File::Basename qw( basename );
+use Text::Forge::Sendmail;
+
+sub usage {
+  print "Usage: $0 --list=<path> --template=<path> [--queue]\n";
+  print "          [--delimiter=<string>]\n";
+  exit 1;
+}
+
+sub parse_options {
+  my %opt = ();
+  GetOptions(\%opt, 'list=s', 'template=s', 'delimiter=s', 'queue');
+  usage unless $opt{list} and $opt{template};
+  $opt{delimiter} ||= '\\|';    
+
+  %opt;
+}
+
+sub open_list {
+  my $path = shift;
+
+  $LIST_FH = new IO::File $path or die "unable to read '$path': $!\n";
+}
+
+sub open_log {
+  my $path = shift;
+
+  $LOG_FH = new IO::File ">> $path" or die "unable to write '$path': $!\n";
+  $LOG_FH->autoflush(1);
+}
+
+sub open_checkpoint {
+  my $path = shift;
+
+  unless (-e $path) {
+    my $fh = new IO::File "> $path" or die "unable to create '$path': $!\n";
+  }
+  $CHECK_FH = new IO::File "+< $path" or die "unable to read '$path': $!\n";
+  $CHECK_FH->autoflush(1);
+  flock $CHECK_FH, LOCK_EX or die "unable to obtain lock on '$path': $!\n";
+  seek $CHECK_FH, 0, 0 or die "seek error on '$path': $!";
+}
+
+sub write_log {
+  my $message = join('', @_);
+
+  flock $LOG_FH, LOCK_EX or die "unable to flock logfile: $!\n";
+  seek $LOG_FH, 0, 2 or die "unable to seek on logfile: $!\n";
+  my $date = scalar localtime;
+  print $LOG_FH "$date [$$] $message\n";
+  flock $LOG_FH, LOCK_UN; 
+}
+
+sub skip_records {
+  chomp(my $skip = <$CHECK_FH>);
+  $skip ||= 0;
+  write_log("skipping $skip ", ($skip == 1 ? 'record' : 'records'));
+  for(my $i=1; $i<=$skip; $i++) {
+    my $line = <$LIST_FH>;
+  }
+
+  $skip;
+}
+
+sub update_checkpoint {
+  my $count = shift;
+
+  seek $CHECK_FH, 0, 0 or die "seek error on checkpoint file: $!\n";
+  print $CHECK_FH "$count\n";
+  truncate($CHECK_FH, tell($CHECK_FH));
+}
+
+my %opt = parse_options;
+
+my $list_name = basename $opt{list};
+-r $opt{template} and -f _ or die "unable to read '$opt{template}': $!\n";
+open_list( $list_name );
+open_checkpoint( "$list_name.chk" );
+open_log( "$list_name.log" );
+
+write_log('starting');
+write_log("list name '$list_name'");
+
+my $skip = skip_records;
+
+my $forge = new Text::Forge::Sendmail;
+$forge->queue( $opt{queue} );
+
+my $count = $skip;
+while(defined(my $record = <$LIST_FH>)) {
+  chomp($record);
+  my @values = split /$opt{delimiter}/, $record;
+  update_checkpoint(++$count);
+  $forge->send( $opt{template}, @values );   
+}
+
+my $total = $count - $skip;
+write_log("finished ($total ", ($total == 1 ? 'message' : 'messages'),
+           ' sent)');
+exit 0;
