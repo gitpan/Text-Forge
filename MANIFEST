@@ -1,5 +1,6 @@
 Changes
 Makefile.PL
+README
 MANIFEST
 MANIFEST.SKIP
 lib/Text/Forge.pm
@@ -12,3 +13,6 @@ t/templates/forge
 t/templates/forge-2.09.out
 t/templates/forge-2.10.out
 t/templates/forge-2.12.out
+doc/style-guide.pod
+doc/tutorial.pod
+contrib/tforge.vim

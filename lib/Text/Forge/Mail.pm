@@ -15,8 +15,9 @@ sub mailer {
 sub send {
   my $self = shift;
 
+  my $body = $self->trap_send(@_);
   my $mailer = $self->open($self->mailer);
-  $mailer->print($self->trap_send(@_));
+  $mailer->print($body);
   $mailer->close;
 }
 

@@ -1,5 +1,17 @@
 Revision history for Perl extension Text::Forge.
 
+2.15 Thu Feb  6 18:15:38 PST 2003
+  - changed Text::Forge::Mail to allow headers to
+    be set/modified within template
+  - added vim syntax file to contrib
+    Adam Monsen <adamm@wazamatta.com>
+  - added style-guide.pod and tutorial.pod to doc/
+    Jonathan Gardner <jgardn@alumni.washington.edu>
+  - wrote README
+  - replaced File::PathConvert::rel2abs with
+    File::Spec->rel2abs (rt.cpan.org bug #2004)
+  - fixed tied handle PRINTF callback
+
 2.14 Wed Dec  4 13:33:03 PST 2002
   - silenced warning. patch from Aaron Patterson
     <aaron_patterson@speakeasy.net>

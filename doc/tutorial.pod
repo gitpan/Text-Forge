@@ -1,0 +1,198 @@
+=head1 NAME
+
+Text::Forge Tutorial
+
+=head1 SYNOPSIS
+
+We will cover how to write Text::Forge documents. Knowledge of Perl and HTML is
+assumed.
+
+=head1 DESCRIPTION
+
+Text::Forge is a system of creating dynamic web pages. The syntax is simple.
+This is a feature of the system, not a bug.
+
+=head2 Your Page is a Subroutine
+
+Your page is compiled into a subroutine. It may be called, depending on the
+setup of your server, with arguments. Templates may also be called with
+arguments. Look in C<@_> for the actual arguments, just as you would in a
+regular perl subroutine.
+
+Note that you do not put C<sub> declarations in your page. That is added for
+you.
+
+Whatever you page prints out, that is what your page shows when rendered.
+
+=head2 Normal Text is Double-Quoted
+
+Everything except the escaped perl code is interpreted as double-quoted text.
+
+For instance, C<Hello, my name is $name!> is interpreted as C<Hello, my name
+is Jonathan!> if C<$name> is C<'Jonathan'>.
+
+Of course, normal text is printed out so that it shows up on the rendered page.
+
+=head2 Construct Overview
+
+There are four constructs to escape perl code in the text page.
+
+=over
+
+=item Code Block - C<<< <% ... %> >>>
+
+The C<<< <% ... %> >>> construct allows you to insert regular perl code. The
+result is not interpreted. A semi-colon is placed at the end of the block. If
+you want to output something to the page from inside a code block, you can use
+a print statement.
+
+You can use C<<< <% ... %> >>> to use conditional or looping constructs. For
+example:
+
+  <%
+    if ($name eq 'Jonathan') {
+  %>
+  Hello, author!
+  <%
+    } else {
+  %>
+  Hello, reader! I hope you enjoy this tutorial.
+  <%
+    }
+  %>
+
+=item Print Block - C<<< <%$ ... %> >>>
+
+The C<<< <%$ ... %> >>> construct allows you to insert a perl statement that is
+then printed to the page. Do not use a semi-colon at the end.
+
+For instance, C<<< <%$ customer_name($customer_id) %> >>> will call the
+customer_name subroutine and print out the result into the text document.
+
+=item HTML Encode Block - C<<< <%= ... %> >>>
+
+The C<<< <%= ... %> >>> construct allows you to insert a perl statement that is
+then rendered HTML safe.  That means that characters like C<&>,C<<< < >>>, and
+C<<< > >>> are interpreted to the corresponding HTML entity. Do not use a
+semi-colon at the end.
+
+For instance, C<<< <%= 'This is <b>My</b> Biography' %> >>> will change into
+C<This is &lt;b&gt;My&lt;\b&gt; Biography>, which will show up on the rendered
+HTML page as C<<< This is <b>My</b> Biography >>>.
+
+=item URI Escape Block - C<<< <%? ... %> >>>
+
+The C<<< <%? ... %> >>> construct allows you to insert a perl statment that is
+then URI escaped. Do not use a semi-colon at the end.
+
+=back
+
+=head2 The C<$forge> Object
+
+The C<$forge> object is available on every page. There are a few routines that
+may prove helpful.
+
+=over
+
+=item C<<< $forge->include($template[, @args]) >>>
+
+This will include a template. If the first character of the template name is
+C</>, it is interpreted as an absolute file location. Otherwise, all the
+templates in the template include path are searched. You can pass arguments to
+the templates.
+
+A common idiom to use a template is:
+
+  <% $forge->include('page/template', arg1=>$arg1, arg2=>$arg2) %>
+
+=item C<<< $forge->encode_entities($scalar[, $scalar...]) >>>
+
+This is used if you are going to encode something over an over again in a page.
+For instance, someone's name. You cannot tell (unless you look for it) whether
+they have put in HTML code in their name. So, everytime you use their name you
+will be tempted to write:
+
+  <%= $name %>
+
+A better way is to do this:
+
+  <%
+    $name = $forge->encode_entities($name);
+  %>
+  Hello, $name! I am sure you, $name, thought you were smarter than me. Well,
+  $name, I got news for you! I encoded your name (which is $name)!
+
+=item C<<< $forge->uri_escape($scalar[, $scalar...]) >>>
+
+This is the same as the encode_entities method above, except for escaping
+strings for URIs.
+
+=back
+
+=head2 mod_perl and Text::Forge
+
+I'm including this note not because it needs to be here, but because if you are
+as new to mod_perl as you are to Text::Forge, it will bite you. You can also
+find notes about these things in the mod_perl documentation, which you should
+read if you are going to be using mod_perl.
+
+=over
+
+=item Don't Use Non-Lexical Variables
+
+First off, don't put non-lexical variables in you page unless you are
+B<absolutely sure> they won't change. Since you cannot be B<absolutely sure> of
+anything, don't do it.
+
+Since you may be as new to perl as you are to mod_perl and Text::Forge, I'll
+spell this out in plain English.
+
+  <%
+    use strict;
+    use Orders;
+
+    my $orders = Orders->get_order($order_id);
+
+    foreach my $order (@$orders) {
+  %>
+  Your order for $order->{title} will be ready by $order->{ready_date}.<br/>
+  <%
+    }
+  %>
+
+Note the statement C<use strict;>. Note the absence of C<use vars qw(...);>.
+Note that all the variables are declared with C<my>. This will solve 99% of
+your mod_perl problems.
+
+=item Don't Declare C<sub>s in a Page
+
+Don't declare C<subs> in a page. Just don't do it. It is very bad and it won't
+work the way you expect it to.
+
+Put it in a module somewhere, and C<use> that module. In fact, any code that
+does anything useful should be put in a separate module so it can be reused.
+You should avoid using a lot of code in the page except to get stuff to look
+right for that page.
+
+This will solve the other 0.9999% of your mod_perl problems. The remaining
+0.0001% of your mod_perl problems are left as an exercise for the reader to
+solve.
+
+=back
+  
+
+=head1 SEE ALSO
+
+Text::Forge Style Guide
+
+Text::Forge
+
+=head1 AUTHOR
+
+Jonathan Gardner <jgardn@alumni.washington.edu>
+
+=head1 COPYRIGHT
+
+Copyright E<copy> 2002 Jonathan Gardner
+
+Licensed under the GNU Freedoc License.

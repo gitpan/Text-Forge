@@ -2,13 +2,13 @@ package Text::Forge;
 
 use strict;
 use Carp;
-use File::PathConvert ();
+use File::Spec ();
 use HTML::Entities ();
 use URI::Escape ();
 
 use base qw( Class::Accessor::Fast );
 
-our $VERSION = '2.14';
+our $VERSION = '2.15';
 
 our @FINC = ('.');
 our %FINC;
@@ -65,7 +65,7 @@ sub find_template {
   my $path = shift;
 
   foreach my $search (@Text::Forge::FINC, undef) {
-    my $fpath = File::PathConvert::rel2abs($path, $search);
+    my $fpath = File::Spec->rel2abs($path, $search);
     return $fpath if $fpath and -e $fpath and ! -d _;
   }
 
@@ -249,6 +249,7 @@ sub trap_send {
 sub send {
   my $self = shift;
 
+  my $stime = time;
   $self->trap_send(@_);
   print $self->{content};
 }
@@ -291,7 +292,7 @@ sub PRINTF {
   my $self = shift;
 
   $self->send_header unless $self->{header_sent};
-  $self->{content} .= sprintf @_;  
+  $self->{content} .= sprintf shift, @_;
 }
 
 sub UNTIE {}

@@ -1,0 +1,34 @@
+DESCRIPTION
+
+  This module creates documents from templates.
+  Templates are normal text files except they have a bit
+  of special syntax that allows you to run perl code inside
+  them.
+
+INSTALLATION
+
+  To install this module, move into the directory where this file is
+  located and type the following:
+
+        perl Makefile.PL
+        make
+        make test
+        make install
+
+  This will install the module into the Perl library directory.  If
+  you lack sufficient privileges for this, then you can specify an
+  alternate directory like this:
+
+        perl Makefile.PL PREFIX=/where/I/want/it/put
+        make
+        make test
+        make install
+
+
+  See the POD documentation for further details.  Support is available
+  through the Text::Forge site at http://text-forge.sourceforge.net/
+
+COPYRIGHT
+
+  This module is free software; you may redistribute it and/or
+  modify it under the same terms as Perl itself.
