@@ -1,5 +1,36 @@
 Revision history for Perl extension Text::Forge.
 
+2.14 Wed Dec  4 13:33:03 PST 2002
+  - silenced warning. patch from Aaron Patterson
+    <aaron_patterson@speakeasy.net>
+  - added initialize() method to reset object
+    on each call to trap_send()
+    
+2.13 Tue Nov 19 23:17:49 PST 2002
+  - added Text::Forge::Mail subclass
+  - fixed line number problem when newline used
+    as code op; added test for it
+  - cleared header_sent on each call to trap_send
+    so TF object can be reused
+  - add to POD
+
+2.12 Mon Sep  9 01:05:49 CEST 2002
+  - fixed retying; we were passing the class to
+    TIEHANDLE but not the object (so reties to
+    TF classes were failing).
+
+2.11 Tue Jul 16 02:01:37 CEST 2002
+  - inherit from Class::Accessor::Fast to assist in
+    adding subclass accessor methods; add module
+    to PREREQ_PM in Makefile.PL 
+    
+2.10 Mon Jul 15 21:59:35 CEST 2002
+  - parser was too greedy about eliminating whitespace
+    following a tag; was not stopping at first newline
+    encountered.
+
+  - added some tests
+
 0.27
         - fixed DESTROY bug in clones
         - better support for CGI::Carp

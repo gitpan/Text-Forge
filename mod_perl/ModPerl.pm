@@ -1,125 +1,92 @@
 package Text::Forge::ModPerl;
 
-# Based on Apache::Registry 2.01
-
-$Debug = 0;
-
 use strict;
-use vars qw( $VERSION $Debug );
-use Apache::Constants qw( :common &OPT_EXECCGI );
+use vars qw/ $VERSION /;
+use Carp;
+use Apache::Constants qw/ :common REDIRECT /;
 use Apache::ModuleConfig ();
-use Text::Forge::CGI;
+use base qw/ Text::Forge DynaLoader /;
 
-$VERSION = '0.05';
-
-my $Is_Win32 = $^O eq 'MSWin32';
-
-if ($ENV{MOD_PERL}) {
-  no strict;
-  @ISA = qw( DynaLoader );
-  Text::Forge::ModPerl->bootstrap( $VERSION );
+BEGIN {
+  # OPT_EXECCGI(); # preload according to Apache::PerlRun
+  $VERSION = '2.03';
+  Text::Forge::ModPerl->bootstrap( $VERSION ); # XXX check where this should go
+  __PACKAGE__->mk_accessors(qw/ status request /);
 }
 
-# SET DEFAULTS
 sub DIR_CREATE {
   my $class = shift;
-
+ 
   bless my $cfg = {}, $class;
-  $cfg->{'ForgeBuffer'}          = 0;
-  $cfg->{'ForgeCacheModule'}     = 'Text::Forge::MemCache';
-  $cfg->{'ForgeInitHandler'}     = undef;
+  $cfg->{ForgeINC} = [];
+  $cfg->{ForgeCache} = 1;
   return $cfg;
 }
 
-sub ForgeTemplatePath ($$$) {
-  my($cfg, $parms, $path) = @_;
+sub ForgeINC ($$@) {
+  my($cfg, $parms, $arg) = @_;
 
-  $cfg->{'ForgeTemplatePath'} = $path;
+  push @{ $cfg->{ForgeINC} }, $arg;
 }
 
-sub ForgeCacheModule ($$$) {
-  my($cfg, $parms, $module) = @_;
+sub ForgeCache ($$$) {
+  my($cfg, $parms, $arg) = @_;
 
-  $cfg->{'ForgeCacheModule'} = $module;
-}               
-
-sub ForgeBuffer ($$$) {
-  my($cfg, $parms, $flag) = @_;
-
-  $cfg->{'ForgeBuffer'} = $flag;
+  $cfg->{ForgeCache} = $arg;
 }
 
-sub ForgeInitHandler ($$$) {
-  my($cfg, $params, $module) = @_;
+sub send_header {
+  my $self = shift;
 
-  $cfg->{'ForgeInitHandler'} = $module;
+  return if $self->{header_sent}++;
+  $self->{request}->send_http_header;
 }
 
-sub debug {
-  my $r   = shift;
-  my $str = join '', @_;
-
-  $r->log_error("[$$] Text::Forge::ModPerl $str");
-}
-
-sub handler {
-  my($r, @args) = @_;
+sub handler ($$) {
+  my($class, $r) = @_ > 1 ? @_ : (__PACKAGE__, shift());
 
   my $filename = $r->filename;
+  *0 = \$filename;
 
-  $r->finfo; # Cached stat() structure 
+  $r->finfo; # Cached stat() structure
   return NOT_FOUND unless -r _ and -s _;
   return DECLINED if -d _;
 
-  unless (-x _ or $Is_Win32) {
-    $r->log_reason('file permissions deny server execution', $filename);
-    return FORBIDDEN;
-  }                           
-
-  unless ($r->allow_options & OPT_EXECCGI) {
-    $r->log_reason('options ExecCGI is off in this directory', $filename);
-    return FORBIDDEN;
+  # Support Apache::Filter
+  if (lc($r->dir_config('Filter')) eq 'on') {
+    $r = $r->filter_register;
   }
 
-  # debug($r, "running '$filename'") if $Debug;
+  $r->content_type('text/html; charset=ISO-8859-1');
 
-  my $forge = new Text::Forge::CGI;
+  my $forge = $class->new;
+  $forge->{request} = $r;
+  $forge->{status} = OK;
 
-  if (my $cfg = Apache::ModuleConfig->get( $r )) {
-    $forge->{template_path} = $cfg->{'ForgeTemplatePath'};
-    $forge->{buffer}        = $cfg->{'ForgeBuffer'};
-    $forge->{cache_module}  = $cfg->{'ForgeCacheModule'};
-  
-    if (my $handler = $cfg->{'ForgeInitHandler'}) {
-      # debug($r, "running init handler '$handler'") if $Debug;
-      no strict 'refs';
-      (my $status, @args) = &{ $handler }($r, $forge, @args);  
-      return $status unless $status == DECLINED;
-    }
-  }
-
-  eval { $forge->send( $filename, @args ) };
-
+  my $cfg = Apache::ModuleConfig->get($r);
+  eval {
+    local @Text::Forge::FINC = @{ $cfg->{ForgeINC} || [] };
+    local $Text::Forge::CACHE = $cfg->{ForgeCache};
+    $forge->send($filename);
+  };
+ 
   if ($@) {
-
-    # XXX This needs work!
-    # If CGI::Carp is loaded, let it handle the error.
-    # Note the naseating hack to force CGI::Carp to handle it.
-    # 
-    # Warning: CGI::Carp is not logging the error if some content
-    #          has already been sent to the client 
-    #          (see line 346 of CGI::Carp). So we send the error ourselves.    
-    if (exists $INC{'CGI/Carp.pm'}) {
-      $r->log_error("Text::Forge::ModPerl: $@") if $r->bytes_sent;
-      local *CGI::Carp::ineval = sub { 0 };
-      die $@;
-    }
-
-    $r->log_error("Text::Forge::ModPerl: $@");
+    $r->log_error(__PACKAGE__ . ": $@");
     return SERVER_ERROR;
   }
 
-  OK;
+  return $forge->status;
+}
+
+sub redirect {
+  my $self = shift;
+  my($url, $status) = @_;
+
+  my $r = $self->{request};
+  $r->content_type('text/html');
+  $r->header_out(Location => $url);
+  $self->{header_sent} = 1; # Apache handles headers if status not OK
+  $self->{status} = $status || REDIRECT;
 }
 
 1;
