@@ -10,8 +10,7 @@ WriteMakefile(
     'Class::Accessor::Fast' => 0,
     'Test::More'            => 0,
   },
-
-  'DIR' => [qw( mod_perl )],
+  EXE_FILES  => ['bin/forge'],
 );
 
 __END__

@@ -15,13 +15,9 @@ sub save_output($$) {
 sub matches_file($$) {
   my($file, $doc) = @_;
  
-  my @out = glob "templates/${file}-*.out";
-  @out or die "no test output files found for '$file'";
-  foreach my $path (@out) {
-    open my $fh, '<', $path or die "unable to read '$path': $!";
-    my $fdoc = do { local $/; <$fh> };
-    is($doc, $fdoc, "cmp $file $path");
-  }
+  open my $fh, '<', $file or die "unable to read '$file': $!";
+  my $fdoc = do { local $/; <$fh> };
+  is($doc, $fdoc, "cmp $file");
 }
 
 if (-d 't') {
@@ -41,7 +37,7 @@ ok($forge, 'constructor');
 unshift @Text::Forge::FINC, 'templates';
 
 my $doc = $forge->trap_send('forge');
-matches_file('forge', $doc);
+matches_file('templates/forge.out', $doc);
 save_output('forge', $doc) if $opt{save};
 
 # We had a line numbering problem when a newline was used as the code operator.

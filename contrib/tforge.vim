@@ -3,7 +3,7 @@
 " Maintainer:   Adam Monsen <adamm@wazamatta.com>
 " URL:          http://text-forge.sourceforge.net
 " Remark:       based on aasp.vim, syntax file for Apache::ASP code
-" $Id: tforge.vim,v 1.2 2002/12/05 06:18:35 meonkeys Exp $
+" $Id: tforge.vim,v 1.3 2002/12/05 18:52:31 meonkeys Exp $
 
 " For version 5.x: Clear all syntax items
 " For version 6.x: Quit when a syntax file was already loaded
@@ -17,12 +17,8 @@ runtime! syntax/html.vim
 unlet b:current_syntax
 syn include @Perl syntax/perl.vim
 syn cluster htmlPreproc add=tforgePerlInsideTags
-syn cluster tforgePrePerl add=textForgePrePerl
-syn cluster tforgePostPerl add=textForgePostPerl
 
 syntax region tforgePerlInsideTags keepend matchgroup=Delimiter start=+<%[=$?]\=+ skip=+[^\\]".{-}[^\\]"+ end=+%>+ contains=@Perl
-syntax region textForgePrePerl keepend start=/^use/ end=/\c<FORGE>/ contains=@Perl
-syntax region textForgePostPerl keepend start=/\c<\/FORGE>/ end=/1/ contains=@Perl
 
 let b:current_syntax = "tforge"
 

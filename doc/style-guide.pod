@@ -72,20 +72,35 @@ team.
 Also, be sure to indent the code, like you would indent code in curly braces
 (C<{>, C<}>) or parentheses (C<(>, C<)>).
 
+Here are three examples of common ways to format some code blocks. You should
+decide which one works for you and stick with it.
+
   <%
-
-    use MyModule;
-    
-    $obj = new MyModule;
-
-    $obj->{name} = "Michael Jackson";
-
-    $obj->dance();
-    $obj->sing();
-    $obj->dance_some_more();
-
+    while (shift @options) {
+  %>
+  Another option is $_->{name}.
+  <%
+      if ($_->{benefits}) {
+  %>
+  The benefits of this option are: <%$ join ", ", @{$_->{benefits}} %>.
+  <%
+      }
+    }
   %>
 
+  <% while (shift @options) { %>
+  Another option is $_->{name}.
+  <%   if ($_->{benefits}) { %>
+  The benefits of this option are: <%$ join ", ", @{$_->{benefits}} %>.
+  <%   }
+     } %>
+
+  <% while (shift @options) { %>
+  Another option is $_->{name}.
+    <% if ($_->{benefits}) { %>
+  The benefits of this option are: <%$ join ", ", @{$_->{benefits}} %>.
+    <% } %>
+  <% } %>
 
 It's also considered good practice to avoid putting large blocks of
 code into Text::Forge templates. Templates are designed to be simple
@@ -104,8 +119,8 @@ regular text. This is most common when you have text that is dependent on
 multiple conditions or nested loops.
 
 The best way to handle this is to think of each piece of code as a separate
-block. Just because it is a single line, it should not appear much different
-than five lines of code.
+block. The code may grow in the future as well, so this tends to increase
+maintainability.
 
 For HTML, you need to be strategic with your placement of the markers so that
 whitespace isn't introduced in the wrong places. Note that a closing marker
@@ -172,29 +187,45 @@ is available for ViM and Emacs.
 
 =head2 Code Snippets
 
-Oftentimes, it is smart to use small snippets of code that directly translate
-into real text. In this case, try to keep the code flowing with the text. Here
-are some examples.
+Oftentimes, it is more readable to use small snippets of code that directly
+translate into real text than to store the text in a variable and use it later.
+In this case, try to keep the code flowing with the text. Here are some
+examples.
 
-  You can choose one of three options: <%$ join ", ", @options %>
+  You can choose one of these options: <%$ join ", ", @options %>
+
   Your contract expires <%$ $days_left>30?"in a while":"very soon" %>.
+
+And since templates are always part of the text, it may be wise to include them
+in a single line by themselves everytime they are used. This makes them much
+more identifiable.
  
   <% $forge->include("my_template", @with_my_args) %>
   
 
 =head2 Direct Substitutions
  
-It is safe to use direct substitutions in the text. This is because all the
-text that is not in blocks is treated as if it were in double quotes.
+Using direct substitutions in text tend to increase readability and
+maintainability.
 
   Hello $first_name, I'm glad to see you this $weekday morning!
 
-Be sure you know what is in the text before doing this. You usually want to
-encode input from the user or from another source to be sure that it won't
-harm the formatting of your text, or do much worse like embedding Javascript
-in an HTML page.
+Be sure you know what is in the variable before doing this. You usually want to
+encode input from the user or from another source to be sure that it won't harm
+the formatting of your text, or do much worse like embedding Javascript in an
+HTML page.
 
   We'll deliver "<%= $book_title %>" immediately to your house!
+
+Remember that pre-encoding the variable is wise if it is going to be used
+more than once.
+
+  <%
+    $name = $forge->encode_entities($name);
+  %>
+  Hello, $name!
+  ...
+  As a member of our website, $name, you are entitled to certain benefits.
 
 
 =head2 Coding with HTML People
@@ -251,12 +282,14 @@ modify the page, they should ask the web programmer.
 
 =head1 SEE ALSO
 
-Check out the Text::Forge documentation for background on Text::Forge. Also
-see the Text::Forge tutorial page as well.
+Text::Forge Tutorial
+
+Text::Forge
 
 =head1 AUTHOR
 
 Jonathan Gardner <jgardn@alumni.washington.edu>
+
 Contributions and suggestions made by Adam Monsen and Maurice Aubrey.
 
 =head1 COPYRIGHT

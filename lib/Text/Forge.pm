@@ -8,7 +8,7 @@ use URI::Escape ();
 
 use base qw( Class::Accessor::Fast );
 
-our $VERSION = '2.15';
+our $VERSION = '2.16';
 
 our @FINC = ('.');
 our %FINC;
@@ -94,6 +94,8 @@ sub namespace {
 sub parse {
   my $class = shift;
   local $_ = shift;
+
+  s/^#![^\n]*\n//; # remove shebang line, if present
  
   my @code;
   my $line = 0;

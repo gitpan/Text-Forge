@@ -1,0 +1,70 @@
+Text::Forge + FastCGI + Apache Installation
+-------------------------------------------
+
+Apache home page:  http://www.apache.org/
+FastCGI home page: http://www.fastcgi.com/
+
+*** NOTE: Apache 2.x has not been tested
+
+o Fetch the Apache and mod_fastcgi sources and compile the server.
+  We're using the APACI installation method for this demonstration.
+
+  [maurice@localhost tmp]$ tar -zxvf apache_1.3.27.tar.gz
+  [maurice@localhost tmp]$ cd apache_1.3.27/src/modules
+  [maurice@localhost modules]$ tar -zxvf /tmp/mod_fastcgi-2.4.0.tar.gz
+  [maurice@localhost modules]$ mv mod_fastcgi-2.4.0/ fastcgi
+  [maurice@localhost modules]$ cd ../..
+  [maurice@localhost apache_1.3.27]$ ./configure --activate-module=src/modules/fastcgi/libfastcgi.a
+  [maurice@localhost apache_1.3.27]$ make
+  [maurice@localhost apache_1.3.27]$ su -c "make install"
+
+o Install the FCGI perl module. It needs the 'FCGI.patch' patch located in
+  the contrib/ subdirectory of the Text::Forge distribution.
+
+  # download fcgi-2.4.0.tar.gz
+  [maurice@localhost tmp]$ tar -zxvf fcgi-2.4.0.tar.gz
+  [maurice@localhost tmp]$ cd fcgi-2.4.0/perl
+  [maurice@localhost perl]$ patch < /tmp/text-forge/contrib/FCGI.patch
+  [maurice@localhost perl]$ perl Makefile.PL && make && make test
+  [maurice@localhost perl]$ su -c "make install"
+  
+o Configure the server. There are several different ways to do this but
+  this approach will serve any file with a .tf extension as a Text::Forge
+  document.
+ 
+  First, copy the contrib/forge-fastcgi file from the Text::Forge 
+  distribution into your cgi-bin directory and make sure it's
+  executable. 
+
+  [root@localhost tmp]# cd /usr/local/apache/cgi-bin
+  [root@localhost cgi-bin]# cp /tmp/text-forge/contrib/forge-fastcgi .
+  [root@localhost cgi-bin]# chmod a+rx forge-fastcgi
+
+  Then edit the server's config file and add the following stanzas.
+
+  [root@localhost conf]# cd /usr/local/apache/conf
+  [root@localhost conf]# vi httpd.conf
+
+    <Location /cgi-bin/forge-fastcgi>
+      SetHandler fastcgi-script
+      Options +ExecCGI
+    </Location>
+  
+    <Location />
+      AddHandler text-forge .tf
+      Action text-forge /cgi-bin/forge-fastcgi
+    </Location>
+
+o Restart the server
+
+  [root@localhost conf]# /usr/local/apache/bin/apachectl restart
+
+o Create a test file.
+
+  [root@localhost tmp]# echo "<html><body><h1>Hello World! <%= scalar localtime %>" > /usr/local/apache/htdocs/test.tf
+
+o And try fetching it with your favorite browser
+  [maurice@localhost tmp]$ lynx http://localhost/test
+
+o If you see the message Hello World! with the current date and time,
+  then it works! Otherwise, check the server logs for any error messages.

@@ -37,3 +37,8 @@ lead <%
 %> trail
 <% $count == 6 or die "count should be 6 not $count" %>
 parsing: $count
+
+<% # test tied handle PRINTF %>
+<% printf "%20.2f %s", 134.34, 'test' %>
+
+end

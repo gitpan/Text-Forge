@@ -1,5 +1,13 @@
 Revision history for Perl extension Text::Forge.
 
+2.16 Tue Aug  5 01:20:49 PDT 2003
+  - added fast_cgi support
+  - added mod_perl 2 support
+  - removed missing files from MANIFEST
+  - skip install of Text::Forge::ModPerl if mod_perl isn't found
+  - strip shebang line from templates, if present
+  - added bin/forge intepreter for running templates from command-line
+
 2.15 Thu Feb  6 18:15:38 PST 2003
   - changed Text::Forge::Mail to allow headers to
     be set/modified within template

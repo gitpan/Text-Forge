@@ -1,0 +1,49 @@
+#!/usr/bin/perl
+
+# Usage: ./forge.pl [--class=cgi|mail] [template]
+#
+# You can add this script to the shebang line to your templates
+# so they can be executed directly from the command-line.
+# For example: #!/usr/bin/forge.pl
+#
+# If your OS refuses to run an interpreter that's a shell script,
+# install the PAR perl module and compile it into a binary first:
+# 
+#   pp -o forge-bin forge
+#
+# BUGS: 
+#
+# Some OSes won't pass any arguments to the intepreter, or will
+# only pass one. Perl seems to handle it by parsing the shebang line
+# itself. We could do that too, but would we need to emulate the shell's
+# word splitting? I guess we could re-exec with the additional arguments,
+# but that's slow. Anyway, we can figure out a solution if this affects
+# anyone.
+
+use strict;
+use Text::Forge;
+use Getopt::Long qw/ GetOptions /;
+
+my %abbrev = (
+  cgi  => 'Text::Forge::CGI',
+  mail => 'Text::Forge::Mail',
+);
+
+my $class;
+GetOptions("class|module=s" => \$class);
+$class ||= 'Text::Forge';
+$class = $abbrev{ lc $class } if exists $abbrev{ lc $class };
+
+eval "require $class" or die $@;
+
+push @ARGV, '-' unless @ARGV;
+foreach (@ARGV) {
+  my $forge = $class->new;
+  if ($_ eq '-') {
+    my $doc = do { local $/; <STDIN> };
+    $forge->send(\$doc);
+  } else {
+    $forge->send($_);
+  }
+}
+exit 0;
