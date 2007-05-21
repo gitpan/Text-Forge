@@ -31,12 +31,16 @@ like($Text::Forge::VERSION, qr/\d+(\.\d+)+/, 'version');
 my %opt;
 GetOptions(\%opt, 'save');
 
-my $forge = Text::Forge->new;
+my $forge = Text::Forge->new(trim => 1, interpolate => 1);
 ok($forge, 'constructor');
 
-unshift @Text::Forge::FINC, 'templates';
+{
+  package Text::Forge;
+  
+  unshift our @FINC, 'templates';
+}
 
-my $doc = $forge->trap_send('forge');
+my $doc = $forge->run('forge');
 matches_file('templates/forge.out', $doc);
 save_output('forge', $doc) if $opt{save};
 
@@ -47,5 +51,5 @@ my $template = <<EOF;
 
   thisisasyntaxerror; # on line three hopefully! %>
 EOF
-eval { $doc = $forge->trap_send(\$template) };
+eval { $doc = $forge->run(\$template) };
 like($@, qr/\s+at\s+SCALAR.*?\s+line\s+3\./, 'line count with newline');

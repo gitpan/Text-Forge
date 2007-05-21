@@ -6,8 +6,6 @@ MANIFEST.SKIP
 lib/Text/Forge.pm
 lib/Text/Forge/CGI.pm
 lib/Text/Forge/Mail.pm
-lib/Text/Forge/Shell.pm
-bin/forge
 mod_perl/Makefile.PL
 mod_perl/ModPerl.pm
 t/forge.t
@@ -18,3 +16,4 @@ doc/tutorial.pod
 doc/fast-cgi
 doc/modperl2
 contrib/tforge.vim
+META.yml                                 Module meta-data (added by MakeMaker)

@@ -12,7 +12,7 @@ sub mailer {
   return @{ $self->{mailer} || \@MAILER };
 }
 
-sub send {
+sub run {
   my $self = shift;
 
   my $body = $self->trap_send(@_);
@@ -20,6 +20,8 @@ sub send {
   $mailer->print($body);
   $mailer->close;
 }
+
+*send = \&run;
 
 =head1 NAME
 

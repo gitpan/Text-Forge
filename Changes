@@ -1,5 +1,47 @@
 Revision history for Perl extension Text::Forge.
 
+4.1
+  - Added mtime caching option. Caching choice can be specified
+    as option to constructor:
+
+      $forge = Text::Forge->new(cache => 2);
+
+    Possible values are:
+
+      0 - No caching; always recompile
+      1 - Check for mtime changes to file (default)
+      2 - Always cache; no checks done
+
+4.0 
+  - Added interpolate and trim options to constructor.
+    Default behavior now is to *not* trim trailing whitespace
+    or interpolate variables. If you want the old behavior, use:
+
+      $forge = Text::Forge->new(trim => 1, interpolate => 1);
+
+3.05
+  - changed from Dynaloader to XSLoader
+
+3.04 
+  - aliased Text::Forge::Mail::send() to Text::Forge::Mail::run()
+
+3.03 Tue Mar  7 13:51:25 MST 2006
+  - removed separate stat() call
+  - suppress body content if HEAD request
+
+3.02 Sat Feb 18 00:16:22 MST 2006
+  - fixed mod_perl status return; needs testing on mod_perl 2.x
+  - added status() method back
+  - require perl 5.8.x for in-memory string support
+
+3.01 Tue Sep 20 12:31:59 MDT 2005
+  - fixed problem with mod_perl status return
+  - mod_perl 2.x fixed from Eric Kolve <ekolve@comcast.net>
+  - silenced warning patch from Eric Kolve <ekolve@comcast.net>
+  - block delimiters can now be escaped with \<% and \%>
+  - new operator <%# treats the whole block as a comment
+  - added from() method to Text::Forge::Mail
+
 2.16 Tue Aug  5 01:20:49 PDT 2003
   - added fast_cgi support
   - added mod_perl 2 support

@@ -1,19 +1,20 @@
 package Text::Forge::ModPerl;
 
-BEGIN {
-  our $VERSION = '2.04';
-}
-
-use strict;
-use Carp;
-use mod_perl;
-use base qw/ Text::Forge /;
+our $VERSION = '2.04';
 
 use constant MP2 => ($mod_perl::VERSION >= 1.99);
 
+use strict;
+use Carp;
+use XSLoader ();
+
+use base qw/ Text::Forge /;
+
+XSLoader::load(__PACKAGE__, $VERSION) if $ENV{MOD_PERL};
+
 BEGIN {
   my @const = qw/
-    OK DECLINED SERVER_ERROR NOT_FOUND HTTP_MOVED_TEMPORARILY
+    OK DECLINED FORBIDDEN SERVER_ERROR NOT_FOUND HTTP_MOVED_TEMPORARILY
     OR_ALL FLAG ITERATE
   /;
   if (MP2) {
@@ -28,10 +29,10 @@ BEGIN {
     # If you modify these directives, make sure you
     # change @directives in Makefile.PL too
     no strict 'subs';
-    our @APACHE_MODULE_COMMANDS = (
+    our @directives = (
       {
         name         => 'ForgeINC',
-        errmsg       => 'search paths for forge parts',
+        errmsg       => 'Search paths for forge templates',
         args_how     => Apache::ITERATE,
         req_override => Apache::OR_ALL,
       },
@@ -43,10 +44,8 @@ BEGIN {
         req_override => Apache::OR_ALL,
       },
     );
+    Apache::Module::add(__PACKAGE__, \@directives);
   } else {
-    require DynaLoader;
-    push our @ISA, qw/ DynaLoader /;
-    Text::Forge::ModPerl->bootstrap(our $VERSION);
     require Apache::ModuleConfig;
     require Apache::Constants;
     # Create aliases to the new, mod_perl 2.x names
@@ -56,8 +55,6 @@ BEGIN {
       *{__PACKAGE__ . "::$_"} = \&{"Apache::$_"};
     }
   }
-
-  __PACKAGE__->mk_accessors(qw/ status request /);
 }
 
 sub DIR_CREATE {
@@ -86,22 +83,13 @@ sub apache_config {
 
   my $r = $self->{request} or croak "no request object!?";
   if (MP2) {
-    return Apache::Module->get_config(
+    return Apache::Module::get_config(
       __PACKAGE__,
       $r->server,
       $r->per_dir_config,
     );
   } 
   return Apache::ModuleConfig->get($r);
-}
-
-sub send_header {
-  my $self = shift;
-
-  return if $self->{header_sent}++;
-
-  my $r = $self->{request};
-  $r->send_http_header unless MP2;
 }
 
 sub handler ($$) {
@@ -112,10 +100,9 @@ sub handler ($$) {
 
   # Apache 2.x doesn't offer finfo()
   # $r->finfo; # Cached stat() structure
-  stat $filename or return Apache::NOT_FOUND;
-
-  -r _ and -s _ or return Apache::NOT_FOUND;
+  -e $filename or return Apache::NOT_FOUND;
   return Apache::DECLINED if -d _;
+  return Apache::FORBIDDEN unless -r _;
 
   # Support mod_perl 1.x Apache::Filter
   if (!MP2 and lc $r->dir_config('Filter') eq 'on') {
@@ -124,23 +111,30 @@ sub handler ($$) {
 
   $r->content_type('text/html; charset=ISO-8859-1');
 
-  my $forge = $class->new;
+  my $forge = $class->new(
+    interpolate => 1,
+    cache => 2,
+    trim => 1,
+  );
   $forge->{request} = $r;
   $forge->{status} = Apache::OK;
+  
+  my $cfg = MP2 
+    ? Apache::Module::get_config(__PACKAGE__, $r->server, $r->per_dir_config) 
+    : Apache::ModuleConfig->get($r);
 
-  my $cfg = MP2 ? Apache::Module->get_config(__PACKAGE__, $r->server, $r->per_dir_config) : Apache::ModuleConfig->get($r);
-  eval {
-    local @Text::Forge::FINC = @{ $cfg->{ForgeINC} || [] };
-    local $Text::Forge::CACHE = $cfg->{ForgeCache};
-    $forge->send($filename);
-  };
- 
-  if ($@) {
-    $r->log_error(__PACKAGE__ . ": $@");
-    return Apache::SERVER_ERROR;
-  }
+  local @Text::Forge::FINC = @{ $cfg->{ForgeINC} || [] };
+  local $Text::Forge::CACHE = $cfg->{ForgeCache};
 
-  return $forge->status;
+  $forge->run($filename);
+  return $forge->{status} if $forge->{status} != Apache::OK;
+
+  $r->header_out('Content-Length', length $forge->{content});
+  $r->send_http_header unless MP2;
+  # docs say passing ref to print() is deprecated
+  $r->print($forge->{content}) unless uc $r->method eq 'HEAD'; 
+
+  return Apache::OK;
 }
 
 sub redirect {
@@ -150,8 +144,21 @@ sub redirect {
   my $r = $self->{request};
   $r->content_type('text/html');
   $r->headers_out->{Location} = $url;
-  $self->{header_sent} = 1; # Apache handles headers if status not OK
-  $self->{status} = $status || Apache::HTTP_MOVED_TEMPORARILY;
+  $self->status($status || Apache::HTTP_MOVED_TEMPORARILY);
+}
+
+sub request {
+  my $self = shift;
+
+  $self->{request} = shift if @_;
+  return $self->{request};
+}
+
+sub status {
+  my $self = shift;
+
+  $self->{status} = shift if @_;
+  return $self->{status};
 }
 
 1;

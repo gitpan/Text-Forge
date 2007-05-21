@@ -1,4 +1,5 @@
 use ExtUtils::MakeMaker;
+use 5.008;
 
 WriteMakefile(
   'NAME' => 'Text::Forge',
@@ -10,7 +11,7 @@ WriteMakefile(
     'Class::Accessor::Fast' => 0,
     'Test::More'            => 0,
   },
-  EXE_FILES  => ['bin/forge'],
+  EXE_FILES  => [],
 );
 
 __END__
