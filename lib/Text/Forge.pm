@@ -1,25 +1,35 @@
 package Text::Forge;
+# ABSTRACT: Templates with embedded Perl
 
+#{{{ test
+
+
+#}}}
+
+use 5.16.0; # unicode eval
 use strict;
+use warnings;
+use utf8;
+use autodie qw/ :all /;
 use Carp;
+use Encode ();
 use File::Spec ();
 use HTML::Entities ();
 use URI::Escape ();
 
-our $VERSION = '4.01';
+our $VERSION = '6.01';
 
-our @FINC = ('.');
+our @FINC = ('.'); # default search paths
+our %FINC; # compiled template cache
 
-our %FINC;
-our %ABS_PATH;
+our $CACHE = 1; # cache compiled templates by default
 
-our $INTERPOLATE = 0;
-our $TRIM = 0;
-our $CACHE = 1;
-our $NAMESPACE = 'TF'; # package that templates are compiled into
+our $CHARSET = 'utf8';
 
-our $DEBUG = 0;
+our $INTERPOLATE = 0; # deprecated; leave off
 
+
+# define template block operators
 our %OPS;
 {
 
@@ -32,138 +42,170 @@ our %OPS;
   
     '%'  => $code,
     " "  => $code,
-    ''   => $code,
     "\n" => $code,
     "\r" => $code,
     "\t" => $code,
   
     '=' => sub {
-      qq{ print Text::Forge::Util::html_escape($_[0]); } 
+      # Call method as function; faster
+      qq{ print Text::Forge::escape_html(undef, $_[0]); } 
     },
 
     '?' => sub {
-      qq{ print Text::Forge::Util::url_encode($_[0]); }
+      # Call method as function; faster
+      qq{ print Text::Forge::escape_uri(undef, $_[0]); }
     },
 
     '#' => sub { $_[0] =~ s/[^\r\n]//g; $_[0]; },
   );
-
 }
 
-BEGIN {
-  package Text::Forge::Util;
 
-  use strict;
-  use HTML::Entities ();
-  use URI::Escape ();
+#{{{ test
 
-  sub html_escape {
-    my @str = @_;
-    local $_;
 
-    foreach (@str) {
-      s/([^\n\t !\#\$%(-;=?-~])/$HTML::Entities::char2entity{ $1 }/g;
-    }
-    return (wantarray ? @str : $str[0]);
-  }
-  *h = \&html_escape;
-
-  sub url_encode {
-    my @str = @_;
-    local $_;
-  
-    foreach (@str) {
-      s/([^-A-Za-z0-9_.])/$URI::Escape::escapes{ $1 }/g;
-      # s/ /+/g;
-    }
-    return (wantarray ? @str : $str[0]);
-  }
-  *u = \&url_encode;
-
-  # we isolate this to prevent closures in the new sub
-  # is there a better way?
-  sub mksub {
-    no warnings 'redefine';
-    eval $_[0] 
-  }
-}
+#}}}
 
 sub new {
   my $class = shift;
+  my %args = @_;
   
   $class = ref($class) || $class;
   my $self = bless {}, $class;
-  return $self->_initialize(@_);
-}
 
-sub _initialize {
-  my $self = shift;
+  while (@_) {
+    my ($method, $args) = splice @_, 0, 2;
+    $self->$method(ref $args eq 'ARRAY' ? @$args : $args);
+  }
 
-  my %args = (
-    trim => $TRIM,
-    interpolate => $INTERPOLATE,
-    cache => $CACHE,
-    @_
-  );
-
-  %$self = map { +"_tf_$_" => $args{$_} } keys %args;
   return $self;
 }
 
-sub namespace {
+
+#{{{ test
+
+
+#}}}
+
+sub _list {
   my $class = shift;
 
-  $NAMESPACE = shift if @_;
-  return $NAMESPACE;
+  return map { ref $_ eq 'ARRAY' ? @$_ : $_ } @_;
 }
+
+
+#{{{ test
+
+
+#}}}
 
 sub search_paths {
-  my $class = shift;
+  my $self = shift;
 
   if (@_) {
-    @FINC = @_;
-    %ABS_PATH = (); # lookups may change
+    $self->{search} = [
+      grep { defined && length }
+      $self->_list(@_) 
+    ];
   }
-  return @FINC if defined wantarray;
+
+  my $paths = exists $self->{search} ? $self->{search} : \@FINC;
+  return wantarray ? @$paths : $paths;
 }
 
-# From Apache::Registry
-# Assumes: $path is absolute, normalized path
-sub _path2pkg {
+
+#{{{ test
+
+
+#}}}
+
+sub cache {
+  my $self= shift;
+
+  $self->{cache} = shift if @_;
+  return $self->{cache} // $CACHE;
+}
+
+
+#{{{ test
+
+
+#}}}
+
+sub charset {
+  my $self= shift;
+
+  $self->{charset} = shift if @_;
+  return $self->{charset} // $CHARSET;
+}
+
+
+#{{{ test
+
+
+#}}}
+
+sub layout {
+  my $self= shift;
+
+  $self->{layout} = shift if @_;
+  return $self->{layout};
+}
+
+
+#{{{ test
+
+
+#}}}
+
+sub _find_template {
   my $self = shift;
   my $path = shift;
 
-  $path = "/$path" if ref $path;
+  foreach my $search ($self->search_paths, undef) {
+    my $fpath = File::Spec->rel2abs($path, $search);
+    return $fpath if $fpath and -f $fpath;
+  }
+
+  my @search = $self->search_paths;
+  croak "Can't locate template '$path' (search paths: @search)";
+}
+
+
+sub _namespace_prefix { 'TF' }
+
+
+#{{{ test
+
+
+#}}}
+
+# From Apache::Registry
+# Assumes: $fpath is absolute, normalized path as returned by _find_template()
+sub _namespace {
+  my $self = shift;
+  my $fpath = shift;
 
   # Escape everything into valid perl identifiers
-  $path =~ s/([^A-Za-z0-9_\/])/sprintf("_%02x", ord $1)/eg;
+  $fpath =~ s/([^A-Za-z0-9_\/])/sprintf("_%02x", ord $1)/eg;
+
   # second pass cares for slashes and words starting with a digit
-  $path =~
+  $fpath =~
     s{ (/+)(\d?) }
      { '::' . (length $2 ? sprintf("_%02x", ord $2) : '') }egx;
 
-  return $self->namespace . $path;
+  return $self->_namespace_prefix . $fpath;
 }
 
-my $ws = '\t\r\f ';
-my $block_re = qr/
-  \G
-  ([ \t]*)             # optional leading whitespace
-  <%(.?)(.*?)(?<!\\)%> # start of block
-  ([$ws]*\n)?          # trailing whitespace up to newline
-/xs;
-my $not_block_re = qr/
-  \G
-  (.+?)                # match anything up to...
-  (?=
-    [$ws]*             # optional whitespace followed by 
-    (((?<!\\)<%) | \z) # the next (unescaped) block or end of template
-  )
-/xs;
+
+#{{{ test
+
+
+#}}}
 
 # This parsing technique is discussed in perlop
 sub _parse {
-  my $self = shift;
+  my $class = shift;
   local $_ = shift;
 
   no warnings 'uninitialized';
@@ -172,69 +214,52 @@ sub _parse {
   my $line = 0;
   LOOP: {
     # Match token
-    if (/$block_re/cg) { 
-      my($lws, $op, $block, $rws) = ($1, $2, $3, $4);
-      # warn "OP: '$op' BLOCK: '$block' RWS: '$rws'\n";
-      my $rtrim = 0;
-      $rtrim = substr $block, -1, 1, '' if $block =~ /-\z/;
+    if (/\G<%(.)(.*?)(?<!\\)%>([ \t\r\f]*\n)?/sgc) {
+      exists $OPS{ $1 } or die "unknown forge token '$1' at line $line\n";
 
-      my $ltrim = 0;
-      if ($op eq '-') {
-        $ltrim = 1;
-        $op = '%';
-      }
+      # If the op is a linefeed we have to keep it to get line numbers right
+      push @code, $OPS{'%'}->($1) if $1 eq "\n";
 
-      exists $OPS{ $op } or die "unknown forge op '$op' at line $line\n";
-
-      if (length $lws and not $ltrim) {
-        push @code, $OPS{'$'}->("qq|$lws|");
-      }
-
-      # If the op is a linefeed we have to keep it to get the line numbers right
-      push @code, $OPS{'%'}->($op) if $op eq "\n";
-
-      push @code, $OPS{ $op }->(map { s/\\%>/%>/g; $_ } "$block");
-      if (length $rws) { # trailing whitespace
-        # Always output as code to keep lines straight
-        push @code, $OPS{'%'}->($rws);
-        unless ($rtrim) {
-          # We already output the newlines as code, so escape them
-          # if we need to print too.
-          my $str = $rws;
-          $str =~ s/([\n\r\f])/sprintf "\\x{%04x}", ord($1)/ge;
-          push @code, $OPS{'$'}->("\$forge->{_tf_trim} ? '' : qq|$str|");
-        }
-      }
-      $line += do { my $m = "$block$rws"; $m =~ tr/\n/\n/ };
+      push @code, $OPS{ $1 }->(map { s/\\%>/%>/g; $_ } "$2");
+      push @code, $OPS{'%'}->($3) if length $3; # maintain line numbers 
+      $line += "$1$2$3" =~ tr/\n//;
       redo LOOP;
     }
 
-    # Match anything up to the beginning of a block 
-    if (/$not_block_re/cg) {
+    # Match anything up to the beginning of a token
+    if (/\G(.+?)(?<!\\)(?=<%)/sgc) {
       my $str = $1;
       $str =~ s/((?:\\.)|(?:\|))/$1 eq '|' ? '\\|' : $1/eg;
-      push @code,
-        $OPS{'$'}->("\$forge->{_tf_interpolate} ? qq|$str| : q|$str|");
-      $line += do { my $m = $str; $m =~ tr/\n/\n/ };
+      push @code, $OPS{'$'}->($INTERPOLATE ? "qq|$str|" : "q|$str|");
+      $line += $1 =~ tr/\n//;
       redo LOOP;
     }
 
     my $str = substr $_, pos;
-    warn "Something's wrong" if length $str;
+    $str =~ s/((?:\\.)|(?:\|))/$1 eq '|' ? '\\|' : $1/eg;
+    if (length $str) {
+      push @code, $OPS{'$'}->($INTERPOLATE ? "qq|$str|" : "q|$str|");
+    }
   }
 
   return join '', @code;
 }
 
+
+#{{{ test
+
+
+#}}}
+
 sub _named_sub {
   my($self, $package, $path, $code) = @_;
 
   return join '',
-    "package $package;\n\nuse strict;\n\n",
-    "*h = \\&Text::Forge::Util::html_escape;\n",
-    "*u = \\&Text::Forge::Util::url_encode;\n",
+    "package $package;\n\n",
+    "use strict;\n",
+    "use Carp;\n\n",
     "sub run {\n",
-    "  my \$forge = shift;\n",
+    "  my \$self = shift;\n",
     qq{\n# line 1 "$path"\n},
     "  $code",
     "\n}\n",
@@ -242,222 +267,904 @@ sub _named_sub {
   ;  
 }
 
-sub _compile {
-  my $self = shift;
-  my $path = shift;
 
-  my $code;
-  if (ref $path eq 'SCALAR') { # inline template?
-    $code = $self->_parse($$path);
-  } else {
-    open my $fh, '<', $path or croak "unable to read '$path': $!";
-    my $source = do { local $/; <$fh> };
-    $code = $self->_parse($source);
+#{{{ test
+
+
+#}}}
+
+sub _anon_sub {
+  my($self, $package, $path, $code) = @_;
+
+  return join '',
+    "return sub {\n",
+    "  package $package;\n",
+    "use strict;\n",
+    "use Carp;\n\n",
+    "  my \$self = shift;\n",
+    qq{# line 1 "$path"\n},
+    "  $code",
+    "\n}\n",
+  ;
+}
+
+
+#{{{ test
+
+
+#}}}
+
+# we isolate this to prevent closures in the new sub. better way?
+sub _mksub { eval $_[0] }
+
+
+#{{{ test
+
+
+#}}}
+
+sub _compile {
+  my($self, $path) = @_;
+
+  my $ref = ref $path;
+
+  return $path if $ref eq 'CODE';
+
+  if ($ref eq 'SCALAR') { # inline template?
+    my $package = $self->_namespace($path);
+    my $code = $self->_parse($$path);
+    $code = $self->_anon_sub($package, $path, $code);
+    #warn "\n\nCODE:\n$code\n\n";
+    my $sub = Text::Forge::_mksub($code);
+    croak "compilation of inline template failed: $@" if $@;
+
+    # XXX Should we clear the cache if it becomes too large?
+    $FINC{ $path } = $sub if $self->cache;
+    return $sub;
   }
-  my $pkg = $self->_path2pkg($path);
-  $code = $self->_named_sub($pkg, $path, $code);
-  my $sub = Text::Forge::Util::mksub($code);
-  croak "compilation of forge template '$path' failed: $@" if $@;
+
+  my $fpath = $self->_find_template($path);
+  my $package = $self->_namespace($fpath);
+
+  my $charset = $self->charset;
+  $charset = ":encoding($charset)" if $charset;
+
+  open my $fh, "<$charset", $fpath;
+  my $source = do { local $/; <$fh> };
+  my $code = $self->_parse($source, $fpath);
+  $code = $self->_named_sub($package, $fpath, $code);
 
   #warn "CODE\n#########################\n$code\n############################\n";
+  my $sub = Text::Forge::_mksub($code);
+  croak "compilation of forge template '$fpath' failed: $@" if $@;
+
+  $FINC{ $path } = $sub if $self->cache;
   return $sub;
 }
 
-sub _find_template {
-  my $class = shift;
-  my $path = shift;
 
-  if (File::Spec->file_name_is_absolute($path)) {
-    return File::Spec->canonpath($path);
-  }
+#{{{ test
 
-  return $ABS_PATH{ $path } if $ABS_PATH{ $path };
 
-  foreach my $base ($class->search_paths) {
-    my $abs_path = File::Spec->rel2abs($path, $base) or next;
-    return $ABS_PATH{ $path } = $abs_path if -f $abs_path;
-  }
-
-  croak "Can't locate template '$path' in \@FINC (\@FINC contains: @FINC)";
-}
+#}}}
 
 sub include {
   my $self = shift;
   my $path = shift;
 
-  my $sub;
-  unless ($sub = $self->{_tf_finc}{ $path }) { # instance cache
-    my $is_ref = ref $path eq 'SCALAR';
-    my $abs_path = $is_ref ? $path : $self->_find_template($path);
+  delete $FINC{ $path } unless $self->cache;
 
-    my $mtime;
-    if ($self->{_tf_cache} and $FINC{ $abs_path }) { # global cache
-      if (not $is_ref and 1 == $self->{_tf_cache}) {
-        $mtime = (stat($abs_path))[9];
-        unless ($mtime and $FINC{ $abs_path }[1] == $mtime) {
-          delete $FINC{ $abs_path };
-        }
-      }
-      $sub = $FINC{ $abs_path }[0] if $FINC{ $abs_path };
-    }
-
-    unless ($sub) { # recompile
-      $sub = $self->_compile($abs_path) or croak "no sub?!";
-      if ($self->{_tf_cache}) {
-        if (not $is_ref and 1 == $self->{_tf_cache}) {
-          $mtime ||= (stat($abs_path))[9];
-        }
-        $FINC{ $abs_path } = [$sub, $mtime];
-      }
-    }
-
-    $self->{_tf_finc}{ $path } = $sub;
-  }
+  my $sub = ref $path eq 'CODE' 
+              ? $path
+              : $FINC{ $path } || $self->_compile($path);
 
   $sub->($self, @_); 
 }
 
-sub content { $_[0]->{content} }
+
+#{{{ test
+
+
+#}}}
+
+sub content {
+  my $self = shift;
+
+  $self->{content} = join '', $self->_list(@_) if @_;
+  return $self->{content}; 
+}
+
+
+
+#{{{ test
+
+
+#}}}
+
+sub capture {
+  my $self = shift;
+
+  my $charset = $self->charset;
+
+  my $enc = $charset ? ":$charset" : '';
+
+  my $content;
+  {
+    local *STDOUT;
+    open STDOUT, ">$enc", \$content;
+    my $ofh = select STDOUT;
+
+    $self->include(@_);
+
+    select $ofh;
+  }
+
+  return $charset ? Encode::decode($charset, $content) : $content;
+}
+
+
+#{{{ test
+
+
+#}}}
+
+sub content_for {
+  my $self = shift;
+
+  @_ or croak "no capture name supplied";
+
+  $self->{captures} ||= {};
+
+  return $self->{captures}{ shift() } if 1 == @_;
+
+  while (@_) {
+    my ($name, $val) = splice @_, 0, 2;
+    my $type = ref $val;
+    if ($type eq 'CODE') {
+      $val = $self->capture($val);
+    } elsif ($type eq 'ARRAY') {
+      $val = join '', @$val;
+    }
+    $self->{captures}{ $name } .= $val;
+  }
+}
+
+
+#{{{ test
+
+
+#}}}
+
+# Note that layouts may be called recursively.
+sub _apply_layout {
+  my $self = shift;
+  my $layout = shift || $self->layout or return;
+
+  local $self->{layout} = $layout;
+
+  while (my $layout = $self->{layout}) {
+    $self->{layout} = undef;
+    local $_ = $self->{captures}{main} = $self->{content};
+    eval { $self->{content} = $self->capture($layout) };
+    croak "Layout '$layout' failed: $@" if $@;
+  }
+}
+
+
+#{{{ test
+
+
+#}}}
 
 sub run {
   my $self = shift;
 
-  $self->{content} = '';
-  local *STDOUT;
-  open STDOUT, '>', \$self->{content}
-    or croak "can't redirect STDOUT to scalar: $!";
-  $self->include(@_);
+  $self->{content} = $self->capture(@_);
+  $self->_apply_layout;
 
   return $self->{content} if defined wantarray;
 }
 
-# deprecated; use "print $forge->run('template')" instead
-*trap_send = \&run;
-sub send { 
-  my $self = shift;
 
-  print $self->run(@_)
+#{{{ test
+
+
+#}}}
+
+sub escape_uri {
+  my $class = shift;
+
+  my @str = map {
+    (ref $_ and eval { $_->can('as_uri') })
+      ? $_->as_uri : URI::Escape::uri_escape_utf8($_)
+  } @_;
+
+  return wantarray ? @str : join '', @str;
+}
+*u = \&escape_uri;
+
+
+#{{{ test
+
+
+#}}}
+
+{
+  # "unsafe" chars and all ascii control chars except for tab,
+  # line feed, and carriage return
+  my $chars = q{<>&"'\x00-\x08\x0B\x0C\x0E-\x1F\x7F};
+
+  sub escape_html {
+    my $class = shift;
+
+    my @str = map {
+      (ref $_ and eval { $_->can('as_html') })
+        ? $_->as_html : HTML::Entities::encode_entities($_, $chars)
+    } @_;
+
+    return wantarray ? @str : join '', @str;
+  }
+}
+*h = \&escape_html;
+
+
+#{{{ test
+
+
+#}}}
+
+# Deprecated
+{
+  no warnings qw/ prototype redefine /; # conflicts with core::send()
+
+  sub send { 
+    my $self = shift;
+  
+    print $self->run(@_)
+  }
 }
 
-sub url_encode { shift; Text::Forge::Util::url_encode(@_) }
-*u = *escape_uri = \&url_encode;
 
-sub html_escape { shift; Text::Forge::Util::html_escape(@_) }
-*h = *escape_html = \&html_escape;
+#{{{ test
+
+
+#}}}
+
+# Deprecated
+use Method::Alias trap_send => 'run';
+
+
+1;
+
+__END__
+
+=pod
+
+=encoding UTF-8
 
 =head1 NAME
 
-Text::Forge - ERB/PHP/ASP-style templating for Perl
+Text::Forge - Templates with embedded Perl
+
+=head1 VERSION
+
+version 6.01
 
 =head1 SYNOPSIS
 
   use Text::Forge;
+
   my $forge = Text::Forge->new;
 
   # template in external file
-  print $forge->run('/tmp/mytemplate');
+  print $forge->run('path/to/template');
 
-  # inline template (scalar reference)
-  print $forge->run(\"<h1>Hello, World! <%= scalar localtime %></h1>");
+  # template passed as reference
+  print $forge->run(\'
+    <% my $d = scalar localtime %>The date is <%= $d %>
+  ');
+  # Outputs: The date is Fri Nov 26 11:32:22 2010
 
-=head1 DESCRIPTION 
+=head1 DESCRIPTION
 
-Text::Forge is a simple templating system that allows you to
-embed Perl within plain text files. The syntax is very similar
-to other popular systems like ERB, ASP, and PHP.
+This module uses templates to generate documents dynamically. Templates
+are normal text files with a bit of special syntax that allows Perl code
+to be embedded.
 
-=head2 Template Syntax 
+The following tags are supported:
 
-Templates are normal text files except for a few special tags:
- 
-  <% Perl code; nothing output %>
-  <%= Perl expression; result is HTML encoded and output %>
-  <%$ Perl expression; result is output (no encoding) %>
-  <%? Perl expression; result is URL escaped and output %> 
-  <%# Comment; entire block ignored %>
+  <%  %> code block (no output)
+  <%= %> interpolate, result is HTML escaped
+  <%? %> interpolate, result is URI escaped
+  <%$ %> interpolate, no escaping (use with care)
+  <%# %> comment
 
 All blocks are evaluated within the same lexical scope (so my
 variables declared in one block are visible in subsequent blocks).
 
-If a block is followed by a newline and you want to suppress it,
-add a minus to the close tag:
+Code blocks contain straight perl code. It is executed, but nothing
+is output.
 
-  <% ... -%>
+Interpolation blocks are evaluated and the result inserted into
+the template.
 
-=head2 Generating Templates
+Templates are compiled into normal Perl methods. As such, they can
+be passed arguments as you would expect.
 
-To generate a template, you need to instantiate a Text::Forge object and
-tell it the template file to use:
+  print $forge->run(
+    \'<% my %args = @_ %>Name is <%= $args{name} %>',
+    name => 'foo'
+  );
 
-  my $tf = Text::Forge->new;
-  print $tf->run('my_template');
+The $self variable is available within all templates, and is a reference
+to the Text::Forge instance that is generating the document. This allows
+subclasses to provide customization and context to the templates.
 
-Every template has access to a $forge object that provides some helpful
-methods and can be used to pass around context.  Really, the $forge
-object is nothing more than a reference to the Text::Forge object being
-used to construct the template itself.
+If a block is followed solely by whitespace up to the next newline,
+that whitespace (including the newline) will be suppressed from the output.
+If you really want a newline, add another newline after the block.
+The idea is that the blocks themselves shouldn't affect the formatting.
 
-You can include a template within another template using the include() method.
-Here's how we might include a header in our main template.
+Anything printed to standard output (STDOUT) becomes part of the template.
 
-  <% $forge->include('header') %>
+Any errors in compiling or executing a template raises an exception.
+Errors should correctly reference the template line causing the problem.
 
-Templates are really just Perl subroutines, so you can pass values into
-them and they can pass values back.
+=for testing   use_ok $CLASS;
 
-  <% my $rv = $forge->include('header', title => 'foo', meta => 'blurgle' ) %>
+=begin testing
 
-You can generate a template from a scalar (instead of an external file)
-by passing a reference to it.
+  isa_ok $CLASS->new, $CLASS, 'constructor on class name';
+  isa_ok $CLASS->new->new, $CLASS, 'constructor on instance';
 
-  my $tf = Text::Forge->new;
-  $tf->send(\"Hello Word <%= scalar localtime %>");
+  my $forge = $CLASS->new(charset => 'iso-8859-1');
+  ok $forge, 'object created';
+  is $forge->charset, 'iso-8859-1', 'method called from constructor';
 
-=head2 Caching 
+  my @search = ('.', '/tmp');
+  $forge = $CLASS->new(search_paths => \@search);
+  is_deeply scalar $forge->search_paths, \@search,
+    'method called from constructor with arrayref';
 
-By default, templates are compiled, cached in memory, and are only recompiled
-if they change on disk. You can control this through the constructor:
+=end testing
 
-  my $forge->new(cache => 2)
+=for testing   my @list = qw/ a b c /;
+  is_deeply [ $CLASS->_list ], [], 'empty list';
+  is_deeply [ $CLASS->_list(@list), ], \@list, '_list';
+  is_deeply [ $CLASS->_list(\@list) ], \@list, '_list arrayref flattened';
+  is_deeply [ $CLASS->_list(@list, \@list) ], [@list, @list], '_list multi';
 
-Valid cache values are:
+=begin testing
 
-  0 - always recompile
-  1 - recompile if modified
-  2 - never recompile
+  my $forge = $CLASS->new;
+  is_deeply [ $forge->search_paths ], \@Text::Forge::FINC,
+    'search_paths, defaults to \@FINC';
 
-=head2 Search Paths
 
-If a relative path is passed to the run() method, it is searched for
-within a list of paths. You can adjust the search paths through
-the search_paths() class method:
+  my @search = ('/tmp/view');
+  $forge = $CLASS->new(search_paths => [@search, undef]);
 
-  Text::Forge->search_paths('.', '/tmp');
+  is_deeply [ $forge->search_paths ], \@search,
+    'search_paths, list context';
 
-By default, the search path is just the current directory, '.'
+  is_deeply scalar $forge->search_paths, \@search,
+    'search_paths, scalar context';
 
-=head2 Error Handling
 
-Exceptions are raised on error.  We take pains to make sure the line numbers
-reported in errors and warnings match the line numbers in the templates themselves.
+  push @search, '/tmp/fallback';
+  is_deeply [ $forge->search_paths(\@search) ], \@search,
+    'search_paths, set';
 
-=head2 Other Constructor Options
+  is_deeply [ $forge->search_paths ], \@search,
+    'search_paths, list context';
 
-  # Automatically trim trailing newlines from all blocks.
-  my $forge = Text::Forge->new(trim => 1);
+  is_deeply scalar $forge->search_paths, \@search,
+    'search_paths, scalar context';
 
-  # Interpolate variables outside template blocks (treats the
-  # whole template as a double quoted string). Not recommended.
-  my $forge = Text::Forge->new(interpolate => 1);
+=end testing
 
-=head1 AUTHOR 
+=begin testing
 
-Copyright 1999-2007, Maurice Aubrey <maurice@hevanet.com>.
-All rights reserved.
+  my $forge = $CLASS->new;
+  is $forge->cache, $Text::Forge::CACHE, 'cache, defaults to $CACHE';
 
-This module is free software; you may redistribute it
-and/or modify it under the same terms as Perl itself.
+  foreach (0, 1) {
+    is $forge->cache($_), $_, "cache, set $_";
+    is $forge->cache, $_, 'cache, get';
+  }
+
+=end testing
+
+=begin testing
+
+  my $forge = $CLASS->new;
+  is $forge->charset, $Text::Forge::CHARSET,
+    'charset, defaults to $CHARSET';
+
+  my $charset= 'iso-8859-1';
+  is $forge->charset($charset), $charset, "charset, set to '$charset'";
+  is $forge->charset, $charset, 'charset, get';
+
+=end testing
+
+=begin testing
+
+  my $forge = $CLASS->new;
+  is $forge->layout, undef, 'layout, default undefined';
+
+  my $layout = '/tmp/foo';
+  is $forge->layout($layout), $layout, "layout, set to '$layout'";
+  is $forge->layout, $layout, 'layout, get';
+
+=end testing
+
+=begin testing
+
+  use File::Temp qw/ tempdir /;
+
+  my $tmpdir = tempdir;
+  chdir $tmpdir;
+  mkdir 'templates';
+
+  my $template_path = "$tmpdir/templates/home";
+  open my $fh, '>', $template_path;
+  print $fh "my path is $template_path";
+
+  my $forge = $CLASS->new(search_paths => []);
+  eval { $forge->_find_template('foo') };
+  ok $@, '_find_template, no search paths defined';
+
+  ok $forge->_find_template("$tmpdir/templates/home"),
+    '_find_template, absolute path';
+
+  $forge = $CLASS->new(search_paths => "$tmpdir/templates");
+  ok $forge->_find_template('home'), '_find_template using search path';
+
+  chdir "$tmpdir/templates";
+  $forge = $CLASS->new(search_paths => []);
+  ok $forge->_find_template('home'), '_find_template always searches cwd';
+
+=end testing
+
+=begin testing
+
+  my $prefix = $CLASS->_namespace_prefix;
+
+  is $CLASS->_namespace('/tmp'), "${prefix}::tmp", '_namespace';
+  is $CLASS->_namespace('/tmp/F$<oo'), "${prefix}::tmp::F_24_3coo",
+    '_namespace, escaped';
+  is $CLASS->_namespace('/tmp/123/foo'), "${prefix}::tmp::_3123::foo",
+    '_namespace, numeric';
+
+=end testing
+
+=begin testing
+
+  my $code = $CLASS->_parse('hello');
+  is $code, ' print q|hello|; ', '_parse, literal string';
+
+  $code = $CLASS->_parse('hello|there|');
+  is $code, ' print q|hello\|there\||; ',
+    '_parse, literal string, pipes escaped';
+
+  $code = $CLASS->_parse("<%\n my \$i = 0 %>");
+  is $code, " \n;   my \$i = 0 ; ", '_parse, code block';
+
+  $code = $CLASS->_parse('<%= "hello >>" %>');
+  is $code, ' print Text::Forge::escape_html(undef,  "hello >>" ); ',
+    '_parse, html block';
+
+  $code = $CLASS->_parse('<%? "hello \%>" %>');
+  is $code, ' print Text::Forge::escape_uri(undef,  "hello %>" ); ',
+    '_parse, escaped closing tag';
+
+  eval { $CLASS->_parse('<%Z "foo" %>') };
+  ok $@, '_parse, unknown block type raises exception';
+
+  $code = $CLASS->_parse(
+    'hello |<%= "world" %> foo \<<% my $i = 0 %> zort\<'
+  );
+  is $code,
+    (
+      ' print q|hello \||; ' .
+      ' print Text::Forge::escape_html(undef,  "world" ); ' .
+      ' print q| foo \<|; ' .
+      ' my $i = 0 ; ' .
+      ' print q| zort\<|; '
+    ),
+    '_parse, complex multi-block'
+  ;
+
+
+  {
+    local $Text::Forge::INTERPOLATE = 1;
+ 
+    my $code = $CLASS->_parse('<% my $i = 5 %>hello $i there <% %> $i');
+    is $code, ' my $i = 5 ;  print qq|hello $i there |;  ;  print qq| $i|; ',
+      '_parse, interpolation enabled [DEPRECATED]';
+  }
+
+=end testing
+
+=begin testing
+
+  my $package = "${CLASS}::Test::NamedSub";
+  my $code = "return 'foo'";
+
+  my $template = $CLASS->_named_sub($package, '/tmp/test', $code);
+  ok $template, '_named_sub, wrap template';
+
+  my $sub = eval $template;
+  ok !$@ && ref $sub eq 'CODE', '_named_sub, eval code';
+
+  is $sub->(), 'foo', '_named_sub, call returned code reference';
+  is $package->run(), 'foo', '_named_sub, call named sub';
+
+=end testing
+
+=begin testing
+
+  my $package = "${CLASS}::Test::AnonSub";
+  my $code = "return 'foo2'";
+
+  my $template = $CLASS->_anon_sub($package, '/tmp/test2', $code);
+  ok $template, '_anon_sub, wrap template';
+
+  my $sub = eval $template;
+  ok !$@ && ref $sub eq 'CODE', '_anon_sub, eval code';
+
+  is $sub->(), 'foo2', 'call template';
+
+=end testing
+
+=begin testing
+
+  my $mksub = eval { $CLASS->can('_mksub') };
+  ok !$@ && ref $mksub eq 'CODE', '_mksub, get sub reference';
+
+  my $rv = $mksub->("return 'foo'");
+  is $rv, 'foo', '_mksub, eval code';
+
+=end testing
+
+=begin testing
+
+  my $forge = $CLASS->new(cache => 1, charset => 'utf8');
+
+  my $sub = $forge->_compile(\'foo');
+  is ref $sub, 'CODE', '_compile, inline template';
+
+  $forge->cache(0);
+  $sub = $forge->_compile(\'foo');
+  is ref $sub, 'CODE', '_compile, inline template with caching disabled';
+
+  my $sub2 = $forge->_compile($sub);
+  is ref $sub2, 'CODE', '_compile, returns code if passed code';
+
+  eval { $forge->_compile(\'<% BAREWORD %>') };
+  ok $@, '_compile, compile error should raise exception';
+
+=end testing
+
+=begin testing
+
+  use Scalar::Util qw/ refaddr /;
+
+  my $forge = $CLASS->new(cache => 1);
+
+  eval { $forge->include(\'') };
+  ok !$@, 'include, inline template';
+
+  is $forge->include(sub { return 12 }), 12, 'include, code reference';
+
+  $forge->cache(0);
+  is $forge->include(sub { return 22 }), 22, 'include, with caching off';
+
+=end testing
+
+=begin testing
+
+  my $forge = $CLASS->new;
+  is $forge->content, undef, 'content, initially undefined';
+  
+  $forge->content('test', [1, 2, 3]);
+  is $forge->content, 'test123', 'content, set';
+
+=end testing
+
+=begin testing
+
+  my $forge = $CLASS->new;
+  $forge->charset('utf8');
+
+  is $forge->capture(\'<% print "foo" %>'), 'foo', 'capture, inline template';
+
+  is $forge->capture(sub { print 'foo' }), 'foo', 'capture, code ref';
+
+  is $forge->capture(sub { print 'exposé, Zoë, à propos' }),
+    'exposé, Zoë, à propos', 'capture, unicode';
+
+  $forge->charset('');
+  is $forge->capture(\'hi'), 'hi', 'capture, no charset set';
+
+=end testing
+
+=begin testing
+
+  my $forge = $CLASS->new;
+
+  $forge->content_for('nav', 'foo');
+  is $forge->content_for('nav'), 'foo', 'content_for, string';
+
+  $forge->content_for('nav', 'zort');
+  is $forge->content_for('nav'), 'foozort', 'content_for, content appended';
+
+  $forge->content_for('nav', sub { print 'blort' });
+  is $forge->content_for('nav'), 'foozortblort', 'content_for, code ref';
+
+  $forge->content_for('nav', [qw/ a b c /]);
+  is $forge->content_for('nav'), 'foozortblortabc', 'content_for, array ref';
+
+  eval { $forge->content_for };
+  ok $@, 'content_for, name required';
+
+=end testing
+
+=begin testing
+
+  my $forge = $CLASS->new;
+
+  $forge->{content} = 'document';
+  $forge->layout(\'<body><%= $self->content_for("main") %></body>');
+  $forge->_apply_layout;
+  is $forge->content, '<body>document</body>', '_apply_layout';
+
+  $forge->layout(\'<body><% BAREWORD %></body>');
+  eval { $forge->_apply_layout };
+  ok $@, '_apply_layout, layout compile error should raise exception'; 
+
+=end testing
+
+=begin testing
+
+  my $forge = $CLASS->new;
+
+  is $forge->run(\'content'), 'content', 'run, no blocks';
+  $forge->run(\'content'); # call in null context for test coverage
+
+  # with layout
+  $forge->layout(\'<body><%$ $self->content_for("main") %></body>');
+  is $forge->run(\'content'), '<body>content</body>', 'run, with layout';
+
+  # nested layouts
+  $forge->layout(\q{
+    <% $self->layout(\'<body><%$ $self->content_for("main") \%></body>') %>
+    <nav><%$ $self->content_for("main") %></nav>
+  });
+  my $content = $forge->run(\'menu');
+  $content =~ s/^\s*//mg;
+  is $content, "<body>\n<nav>menu</nav>\n</body>",
+    'run, nested layouts';
+
+=end testing
+
+=begin testing
+
+  {
+    package Text::Forge::Test::Object;
+
+    sub new { my $class = shift; bless { @_ }, ref($class) || $class }
+
+    sub as_html { $_[0]->{content} }
+    sub as_uri { $_[0]->{content} }
+  }
+
+
+  my $escaped = $CLASS->escape_uri('name=foo?<>');
+  is $escaped, 'name%3Dfoo%3F%3C%3E', 'escape_uri, unsafe chars escaped';
+
+  my @escaped = $CLASS->escape_uri('?foo', 'zort=');
+  is_deeply \@escaped, ['%3Ffoo', 'zort%3D'], 'escape_uri, wantarray';
+
+  my $o = Text::Forge::Test::Object->new(content => '?name=foo');
+  is $CLASS->escape_uri($o), '?name=foo',
+    'escape_uri, object provides uri-escaped content with as_uri()';
+
+=end testing
+
+=begin testing
+
+  my $escaped = $CLASS->escape_html(
+    q{<script type='text/javascript' id="xss">hi</script>}
+  );
+  is $escaped,
+     '&lt;script type=&#39;text/javascript&#39; ' .
+       'id=&quot;xss&quot;&gt;hi&lt;/script&gt;',
+     'escape_html, unsafe chars escaped';
+
+  my @escaped = $CLASS->escape_html('<foo', 'zort"');
+  is_deeply \@escaped, ['&lt;foo', 'zort&quot;'], 'escape_uri, wantarray';
+
+  my $o = Text::Forge::Test::Object->new(content => '<h1>Header</h1>');
+  is $CLASS->escape_html($o), '<h1>Header</h1>',
+    'escape_html, object provides html-escaped content with as_html()';
+
+=end testing
+
+=begin testing
+
+  my $output;
+  {
+    local *STDOUT;
+    open STDOUT, '>', \$output;
+
+    $CLASS->new->send(\'content');
+  }
+
+  is $output, 'content', 'send [DEPRECATED]';
+
+=end testing
+
+=for testing   is $CLASS->new->trap_send(\'foo'), 'foo', 'trap_send [DEPRECATED]';
+
+=head1 METHODS 
+
+=head2 new
+
+Constructor. Returns a Text::Forge instance.
+
+  my $forge = Text::Forge->new(%options);
+
+=head2 run
+
+Generate a template. The first argument is the template, which may be
+either a file path or a reference to a scalar. Any additional arguments
+are passed to the template.
+
+  my $content = $forge->run('path/to/my/template', name => 'foo');
+
+If a path is supplied but is not absolute, it will be searched for within
+the list of L</search_paths>.
+
+The generated output is returned.
+
+=head2 cache
+
+  my $forge = Text::Forge->new;
+  $forge->cache(1);
+
+Dictates whether templates should be cached. Defaults to true.
+
+If caching is enabled, templates are compiled into subroutines once and
+then reused. Cached templates will not reflect changes to the underlying
+template files.
+
+If you want to ensure templates always reflect the latest changes
+on disk (such as during development), set cache() to false.
+
+If you want to maximize performance, set cache() to true.
+
+=head2 charset
+
+  my $forge = Text::Forge->new;
+  $forge->charset('iso-8859-1');
+
+Specifies the character encoding to use for templates.
+Defaults to Unicode (utf8).
+
+=head2 search_paths
+
+The list of directories to search for relative template paths.
+
+  my $forge = Text::Forge->new;
+  $forge->search_paths('/home/app/templates', '.');
+  $forge->run('header'); # looks for /home/app/templates/header and ./header
+
+=head2 content
+
+Returns the result of the last call to run().
+
+=head1 TEMPLATE METHODS
+
+The following methods are intended for use I<within> templates. It's all the
+same object though, so knock yourself out.
+
+=head2 include
+
+Include one template within another.
+
+For example, if you want to insert a "header" template within another
+template. Note that arguments can be passed to included templates and
+values can be returned (like normal function calls).
+
+  my $forge = Text::Forge->new;
+  $forge->run(\'<% $self->include("header", title => 'Hi') %>Hello');
+
+=head2 capture
+
+Capture the output of a template.
+
+Used to capture (but not necessarily include) one template within another.
+For example:
+
+  my $forge = Text::Forge->new;
+  $forge->run(\'
+    <% my $pagination = $self->capture(sub { %>
+         Page 
+         <ul>
+           <% foreach (1..10) { %>
+                <li><%= $_ %></li>
+           <% } %>
+         </ul>
+    <% }) %>
+    <h1>Title</h1>
+    <%$ $pagination %>
+    Results...
+    <%$ $pagination %>
+  ');
+
+In this case the "pagination" content has been "captured" into the variable
+$pagination, which is then inserted in multiple locations within the
+main template.
+
+=head2 content_for 
+
+Capture the output into a named placeholder. Same as capture() except the
+result in stored internally as $forge->{captures}{ $name }.
+
+Note that multiple calls to content_for() with the same name are concatenated
+together (not overwritten); this allows, for example, to have multiple calls
+to something like content_for('head', ...) in various places, which are
+aggregated together and inserted at the head of the document.
+
+When called With two arguments, this method stores the specified content in
+the named location:
+
+  my $forge = Text::Forge->new;
+  $forge->run(\'
+    <h1>Title</h1>
+    <% $self->capture_for('nav', sub { %>
+         <ul>
+           <li>...</li>
+         </ul>
+    <% }) %>
+  ');
+
+When called with one argument, returns the previously stored content, if any:
+
+  my $nav = $self->content_for('nav');
+
+=head2 layout
+
+Specifies a layout template to apply. Defaults to none.
+
+If defined, the layout template is applied after the primary template
+is generated. The layout template may then "wrap" the primary template
+in additional content.
+
+For example, rather than have each template include() a separate header
+and footer template explicitly, a layout() template can be used more
+simply:
+
+  my $forge = Text::Forge->new;
+  $forge->layout(\'<html><body><%$ $_ %></body></html>');
+  print $forge->run(\'<h1>Hello, World!</h1>');
+
+  # results in:
+  # <html><body><h1>Hello, World!</h1></body></html>
+
+Within the layout, the primary template content is available as $_ (as well
+as through $self->content_for('main')).
+
+=head1 AUTHOR
+
+Maurice Aubrey <maurice.aubrey@gmail.com>
+
+=head1 COPYRIGHT AND LICENSE
+
+This software is copyright (c) 2014 by Maurice Aubrey.
+
+This is free software; you can redistribute it and/or modify it under
+the same terms as the Perl 5 programming language system itself.
 
 =cut
-
-1;
